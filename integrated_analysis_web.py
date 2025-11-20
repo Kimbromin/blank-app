@@ -250,6 +250,12 @@ with tab1:
         st.markdown("---")
         st.subheader("⚙️ 설정")
         
+        # 변수 초기화 (항상 정의되도록)
+        analysis_mode = "일반 히트맵"
+        selected_file = None
+        sheet1_name = None
+        sheet2_name = None
+        
         if st.session_state.excel_data:
             analysis_mode = st.radio(
                 "분석 모드",
@@ -264,12 +270,6 @@ with tab1:
                 sheet2_name = st.selectbox("두 번째 파일", options=file_list, index=min(1, len(file_list)-1))
             else:
                 selected_file = st.selectbox("분석할 파일", options=file_list)
-                sheet1_name = None
-                sheet2_name = None
-        else:
-            selected_file = None
-            sheet1_name = None
-            sheet2_name = None
         
         colormaps = ['viridis', 'plasma', 'inferno', 'magma', 'coolwarm', 
                      'RdYlBu', 'RdYlGn', 'Spectral', 'hot', 'cool']
