@@ -548,79 +548,108 @@ with tab2:
     with col2:
         if uploaded_file:
             try:
-                df = pd.read_excel(uploaded_file)
+                # "직선그래프데이터" 시트 읽기 (A2가 헤더, header=1)
+                try:
+                    df = pd.read_excel(uploaded_file, sheet_name='직선그래프데이터', header=1)
+                except:
+                    # 시트가 없으면 첫 번째 시트 사용
+                    try:
+                        df = pd.read_excel(uploaded_file, header=1)
+                    except:
+                        df = pd.read_excel(uploaded_file)
                 
-                time_col = None
-                temp_cols = []
+                # 모든 열이 NaN인 행 제거
+                df_clean = df.dropna(how='all')
                 
-                for col in df.columns:
-                    col_str = str(col).lower()
-                    if 'time' in col_str or '시간' in col_str or 't' == col_str:
-                        time_col = col
-                    elif 'temp' in col_str or '온도' in col_str or 'temperature' in col_str:
-                        temp_cols.append(col)
-                
-                if time_col is None:
-                    time_col = df.columns[0]
-                if not temp_cols:
-                    temp_cols = [df.columns[1]] if len(df.columns) > 1 else [df.columns[0]]
-                
-                time_data = pd.to_numeric(df[time_col], errors='coerce')
-                temp_data = pd.to_numeric(df[temp_cols[0]], errors='coerce')
-                
-                valid_mask = ~(time_data.isna() | temp_data.isna())
-                time_data = time_data[valid_mask].values
-                temp_data = temp_data[valid_mask].values
-                
-                if len(time_data) > 0:
-                    st.session_state.trend_data = {'time': time_data, 'temp': temp_data}
-                    
-                    if use_smoothing:
-                        temp_data_smooth = gaussian_filter1d(temp_data, sigma=smoothing_sigma)
-                    else:
-                        temp_data_smooth = temp_data
-                    
-                    plateaus = detect_plateaus(time_data, temp_data_smooth, num_plateaus)
-                    
-                    fig, ax = plt.subplots(figsize=(12, 6))
-                    ax.plot(time_data, temp_data, 'b-', linewidth=1, alpha=0.5, label='원본 데이터')
-                    ax.plot(time_data, temp_data_smooth, 'r-', linewidth=2, label='스무딩 데이터')
-                    
-                    colors = plt.cm.tab10(np.linspace(0, 1, len(plateaus)))
-                    for i, plateau in enumerate(plateaus):
-                        ax.axhspan(plateau['temperature'] - 0.5, plateau['temperature'] + 0.5,
-                                  xmin=(plateau['time_start'] - time_data.min()) / (time_data.max() - time_data.min()),
-                                  xmax=(plateau['time_end'] - time_data.min()) / (time_data.max() - time_data.min()),
-                                  alpha=0.3, color=colors[i], label=f"Plateau {i+1}")
-                    
-                    ax.set_xlabel('Time', fontsize=12)
-                    ax.set_ylabel('Temperature [°C]', fontsize=12)
-                    ax.set_title('Temperature Trend Analysis', fontsize=14)
-                    ax.grid(True, alpha=0.3)
-                    ax.legend()
-                    plt.tight_layout()
-                    st.pyplot(fig)
-                    
-                    if plateaus:
-                        st.subheader("평탄 구간 정보")
-                        plateau_df = pd.DataFrame([
-                            {
-                                'Plateau': i+1,
-                                'Time Start': f"{plateau['time_start']:.2f}",
-                                'Time End': f"{plateau['time_end']:.2f}",
-                                'Temperature [°C]': f"{plateau['temperature']:.2f}"
-                            }
-                            for i, plateau in enumerate(plateaus)
-                        ])
-                        st.dataframe(plateau_df, use_container_width=True)
-                    
-                    buf = io.BytesIO()
-                    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-                    buf.seek(0)
-                    st.download_button("📥 그래프 다운로드", data=buf, 
-                                     file_name="trend_analysis.png", mime="image/png")
+                if len(df_clean) == 0:
+                    st.error("데이터가 비어있습니다.")
                 else:
-                    st.error("유효한 데이터를 찾을 수 없습니다.")
+                    # 시간 컬럼 찾기
+                    time_col = None
+                    for col in df_clean.columns:
+                        col_str = str(col).lower()
+                        if any(keyword in col_str for keyword in ['시간', 'time', 'sec', 'second', '초']):
+                            time_col = col
+                            break
+                    
+                    if time_col is None and len(df_clean.columns) >= 1:
+                        time_col = df_clean.columns[0]
+                    
+                    # 온도 컬럼 찾기
+                    temp_cols = []
+                    for col in df_clean.columns:
+                        col_str = str(col)
+                        if '직선' in col_str or 'max' in col_str.lower() or '온도' in col_str or 'temp' in col_str.lower():
+                            temp_cols.append(col)
+                    
+                    if len(temp_cols) == 0:
+                        # 온도 컬럼을 못 찾으면 두 번째 컬럼 사용
+                        if len(df_clean.columns) >= 2:
+                            temp_cols = [df_clean.columns[1]]
+                        elif len(df_clean.columns) >= 1:
+                            temp_cols = [df_clean.columns[0]]
+                    
+                    if time_col is None or len(temp_cols) == 0:
+                        st.error(f"시간 또는 온도 컬럼을 찾을 수 없습니다.\n컬럼 목록: {list(df_clean.columns)}")
+                    else:
+                        time_data = pd.to_numeric(df_clean[time_col], errors='coerce')
+                        temp_data = pd.to_numeric(df_clean[temp_cols[0]], errors='coerce')
+                        
+                        valid_mask = ~(time_data.isna() | temp_data.isna())
+                        time_data = time_data[valid_mask].values
+                        temp_data = temp_data[valid_mask].values
+                        
+                        if len(time_data) > 0 and len(temp_data) > 0:
+                            st.session_state.trend_data = {'time': time_data, 'temp': temp_data}
+                            
+                            if use_smoothing:
+                                temp_data_smooth = gaussian_filter1d(temp_data, sigma=smoothing_sigma)
+                            else:
+                                temp_data_smooth = temp_data
+                            
+                            plateaus = detect_plateaus(time_data, temp_data_smooth, num_plateaus)
+                            
+                            fig, ax = plt.subplots(figsize=(12, 6))
+                            ax.plot(time_data, temp_data, 'b-', linewidth=1, alpha=0.5, label='원본 데이터')
+                            ax.plot(time_data, temp_data_smooth, 'r-', linewidth=2, label='스무딩 데이터')
+                            
+                            colors = plt.cm.tab10(np.linspace(0, 1, len(plateaus)))
+                            for i, plateau in enumerate(plateaus):
+                                ax.axhspan(plateau['temperature'] - 0.5, plateau['temperature'] + 0.5,
+                                          xmin=(plateau['time_start'] - time_data.min()) / (time_data.max() - time_data.min()),
+                                          xmax=(plateau['time_end'] - time_data.min()) / (time_data.max() - time_data.min()),
+                                          alpha=0.3, color=colors[i], label=f"Plateau {i+1}")
+                            
+                            ax.set_xlabel('Time', fontsize=12)
+                            ax.set_ylabel('Temperature [°C]', fontsize=12)
+                            ax.set_title('Temperature Trend Analysis', fontsize=14)
+                            ax.grid(True, alpha=0.3)
+                            ax.legend()
+                            plt.tight_layout()
+                            st.pyplot(fig)
+                            
+                            if plateaus:
+                                st.subheader("평탄 구간 정보")
+                                plateau_df = pd.DataFrame([
+                                    {
+                                        'Plateau': i+1,
+                                        'Time Start': f"{plateau['time_start']:.2f}",
+                                        'Time End': f"{plateau['time_end']:.2f}",
+                                        'Temperature [°C]': f"{plateau['temperature']:.2f}"
+                                    }
+                                    for i, plateau in enumerate(plateaus)
+                                ])
+                                st.dataframe(plateau_df, use_container_width=True)
+                            else:
+                                st.info("평탄 구간이 검출되지 않았습니다.")
+                            
+                            buf = io.BytesIO()
+                            fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+                            buf.seek(0)
+                            st.download_button("📥 그래프 다운로드", data=buf, 
+                                             file_name="trend_analysis.png", mime="image/png")
+                        else:
+                            st.error(f"유효한 데이터를 찾을 수 없습니다.\n시간 데이터: {len(time_data)}개, 온도 데이터: {len(temp_data)}개\n컬럼 목록: {list(df_clean.columns)}")
             except Exception as e:
                 st.error(f"파일 읽기 오류: {str(e)}")
         else:
